@@ -1929,7 +1929,7 @@ emit_sri_vector (MonoCompile *cfg, MonoMethod *cmethod, MonoMethodSignature *fsi
 
 		if (args [1]->opcode == OP_ICONST) {
 			// If the index is provably a constant, we can generate vastly better code.
-			int index = args[1]->inst_c0;
+			int index = GTMREG_TO_INT (args[1]->inst_c0);
 
 			if (index < 0 || index >= elems) {
 				MONO_EMIT_NEW_BIALU_IMM (cfg, OP_COMPARE_IMM, -1, args [1]->dreg, elems);
@@ -2259,7 +2259,7 @@ emit_sri_vector (MonoCompile *cfg, MonoMethod *cmethod, MonoMethodSignature *fsi
 
 		if (args [1]->opcode == OP_ICONST) {
 			// If the index is provably a constant, we can generate vastly better code.
-			int index = args[1]->inst_c0;
+			int index = GTMREG_TO_INT (args[1]->inst_c0);
 
 			if (index < 0 || index >= elems) {
 					MONO_EMIT_NEW_BIALU_IMM (cfg, OP_COMPARE_IMM, -1, args [1]->dreg, elems);
@@ -2410,8 +2410,8 @@ emit_vector64_vector128_t (MonoCompile *cfg, MonoMethod *cmethod, MonoMethodSign
 
 	MonoClass *klass = cmethod->klass;
 	MonoType *etype = mono_class_get_context (klass)->class_inst->type_argv [0];
-	gboolean supported = TRUE;
 
+	// Apart from filtering out non-primitive types this also filters out shared generic instance types like: T_BYTE which cannot be intrinsified
 	if (!MONO_TYPE_IS_VECTOR_PRIMITIVE (etype))
 		return NULL;
 
@@ -2428,9 +2428,17 @@ emit_vector64_vector128_t (MonoCompile *cfg, MonoMethod *cmethod, MonoMethodSign
 		g_free (name);
 	}
 
+	// Special case SN_get_IsSupported intrinsic handling in this function which verifies whether a type parameter T is supported for a generic vector.
+	// As we got passed the MONO_TYPE_IS_VECTOR_PRIMITIVE check above, this should always return true for primitive types.
+	if (id == SN_get_IsSupported) {
+		MonoInst *ins = NULL;
+		EMIT_NEW_ICONST (cfg, ins, 1);
+		return ins;
+	}
+
 #if defined(TARGET_WASM)
 	if (!COMPILE_LLVM (cfg))
-		supported = FALSE;
+		return NULL;
 #endif
 
 // FIXME: Support Vector64 for mini JIT on arm64
@@ -2441,24 +2449,11 @@ emit_vector64_vector128_t (MonoCompile *cfg, MonoMethod *cmethod, MonoMethodSign
 
 #ifdef TARGET_AMD64
 	if (!COMPILE_LLVM (cfg) && (size != 16))
-		supported = FALSE;
-#ifdef TARGET_WIN32
-		supported = FALSE;
-#endif
-#endif
-
-	switch (id) {
-	case SN_get_IsSupported: {
-		MonoInst *ins = NULL;
-		EMIT_NEW_ICONST (cfg, ins, supported ? 1 : 0);
-		return ins;
-	}
-	default:
-		break;
-	}
-
-	if (!supported)
 		return NULL;
+#ifdef TARGET_WIN32
+		return NULL;
+#endif
+#endif
 
 	switch (id) {
 	case SN_get_Count: {
@@ -2729,7 +2724,7 @@ emit_vector_2_3_4 (MonoCompile *cfg, MonoMethod *cmethod, MonoMethodSignature *f
 
 		if (args [1]->opcode == OP_ICONST) {
 			// If the index is provably a constant, we can generate vastly better code.
-			int index = args[1]->inst_c0;
+			int index = GTMREG_TO_INT (args[1]->inst_c0);
 
 			if (index < 0 || index >= elems) {
 				MONO_EMIT_NEW_BIALU_IMM (cfg, OP_COMPARE_IMM, -1, args [1]->dreg, elems);
@@ -2811,7 +2806,7 @@ emit_vector_2_3_4 (MonoCompile *cfg, MonoMethod *cmethod, MonoMethodSignature *f
 		g_assert (fsig->hasthis && fsig->param_count == 2 && fsig->params [0]->type == MONO_TYPE_I4 && fsig->params [1]->type == MONO_TYPE_R4);
 
 		gboolean indirect = FALSE;
-		int elems = 4, index = args [1]->inst_c0;
+		int elems = 4, index = GTMREG_TO_INT (args [1]->inst_c0);
 		int dreg = load_simd_vreg (cfg, cmethod, args [0], &indirect);
 
 		if (args [1]->opcode == OP_ICONST) {
@@ -5719,7 +5714,7 @@ emit_wasm_supported_intrinsics (
 				break;
 			}
 			case SN_ExtractScalar: {
-				op = type_to_xextract_op (arg0_type);
+				op = GINT_TO_UINT16 (type_to_xextract_op (arg0_type));
 				break;
 			}
 			case SN_LoadScalarVector128: {
